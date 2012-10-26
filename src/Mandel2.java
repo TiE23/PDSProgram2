@@ -122,8 +122,8 @@ public final class Mandel2 extends Applet implements MouseListener {
 			//frame.printAll(g);
 
 			// Save as JPEG
-			File file = new File("newimage.jpg");
-			ImageIO.write(awtImage, "jpg", file);
+			File file = new File("newimage.png");
+			ImageIO.write(awtImage, "png", file);
 		} catch (IOException err) {
 		}
 
