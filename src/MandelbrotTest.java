@@ -6,7 +6,7 @@ import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.awt.image.ColorModel;
 import java.awt.image.WritableRaster;
- 
+
 import javax.swing.JFrame;
 import javax.swing.JPanel;
  

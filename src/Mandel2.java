@@ -1,9 +1,18 @@
 import java.applet.Applet;
-import java.awt.*;
-import java.awt.event.*;
-
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.Frame;
+import java.awt.Graphics;
+import java.awt.event.InputEvent;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+
 import javax.imageio.ImageIO;
 
 public final class Mandel2 extends Applet implements MouseListener {
@@ -110,7 +119,8 @@ public final class Mandel2 extends Applet implements MouseListener {
 			zoom = 1.0;
 		}
 		repaint();
-		System.out.println("Zoom level: " + zoom + ", Max Iterations: " + max );
+		System.out.println("Zoom level: " + zoom + ", Max Iterations: " + max +
+				"\n ViewX:" + viewX + " ViewY:" + viewY);
 
 
 		try {
