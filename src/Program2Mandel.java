@@ -1,3 +1,4 @@
+// Kyle Geib - Program 2 - CSS434 Fall 2012 - Dr Fukuda - October 30th 2012
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -20,7 +21,7 @@ public class Program2Mandel {
 	private int height;
 	
 
-	/** Constructor
+	/** Constructor for Program2Mandel
 	 * 
 	 * @param resX
 	 * @param resY
@@ -29,9 +30,17 @@ public class Program2Mandel {
 	 * @param imgZoom
 	 * @param viewingX
 	 * @param viewingY
+	 * @param imageOption
 	 */
 	public Program2Mandel(int resX, int resY, int maxIt, int palletSize,
-			double imgZoom, double viewingX, double viewingY) {
+			double imgZoom, double viewingX, double viewingY, int imageOption){
+		
+		// Catching bad values
+		if (resX < 1 || resX > 5000 || resY < 1 || resY > 5000
+				|| imgZoom > 1 || viewingX < 0 || viewingX > 1
+				|| viewingY < 0 || viewingY > 1 || maxIt < 1
+				|| maxIt > 10000 || palletSize < 1 || palletSize > 255)
+			return;
 		
 		pixelArray = new int[resX * resY];
 		width = resX;
@@ -41,29 +50,44 @@ public class Program2Mandel {
 		viewX = viewingX;
 		viewY = viewingY;
 		colorPallet = new int[palletSize];
-		
 		I = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-		createColorPallet();
-		calculatePixels();
-		paintPixels();
 		
-		savePNG();
+		createColorPallet();	// Initialize the pallet
+		calculatePixels();		// Calculate the Mandelbrot image
+		paintPixels();			// Save pixelArray to a BufferedImage
+		
+		saveImg(imageOption);	// Save BufferedImage to a file
 		
 	}
 	
+	/**Imports the pixel array into the BufferedImage using a standard method
+	 */
 	private void paintPixels() {
 		I.setRGB(0, 0, width, height, pixelArray, 0, width);
 	}
 	
-	private void savePNG() {
+	/**Creates a file and uses ImageIO.write to save the BufferedImage to
+	 * a local file location.
+	 * @param option 0 = No Image; 1 = JPEG; 2 = PNG
+	 */
+	private void saveImg(int option) {
+		
+		if (option < 0 || option > 2)
+			return;
+		
 		try {
-			File file = new File("newimage.png");
-			ImageIO.write(I, "png", file);
+			File file = new File("mandelbrot.png");
+			
+			switch(option) {
+			case 0:	break;							// No image saved.
+			case 1: ImageIO.write(I, "jpg", file);	// JPG, lower quality+size
+			case 2: ImageIO.write(I, "png", file);	// PNG, higher quality+size
+			}
 		} catch (IOException e) { e.printStackTrace(); }
 	}
 	
-	/** calculatePixels
-	 * 
+	/**Performs a nested loop that does the calculations of a Mandelbrot
+	 * image with support for zoom and varying locations.
 	 */
 	private void calculatePixels() {
 		for (int y = 0; y < height; y++) {
@@ -107,7 +131,7 @@ public class Program2Mandel {
 	 * on the number of iterations of the Mandelbrot set needed to rule the
 	 * pixel out.
 	 */
-	public void createColorPallet() {
+	private void createColorPallet() {
 
 		for (int i = 0; i < colorPallet.length; i++) {
 			// Generate a gradient of black to white.
@@ -138,11 +162,12 @@ public class Program2Mandel {
 	public static void main(String args[]) {
 		
 		// Console use information
-		if (args.length != 7) {
-			System.out.println("Please place arguments like this:\n"+
-					"Render Width, Render Height, Iterations,\n " + 
-					"Color Pallet Size, Zoom Level (<1),\n" + 
-					"Initial X coord, Initial Y coord");
+		if (args.length != 8) {
+			System.out.println("Please place arguments in this order:\n"+
+					"	Render Width, Render Height, Iterations,\n " + 
+					"	Color Pallet Size (<256), Zoom Level (<=1),\n" + 
+					"	Initial X coord (0-1), Initial Y coord(0-1),\n" +
+					"	[Image format; 1 = jpg, 2 = png, 0 = none]");
 		return;
 		}
 		
@@ -154,7 +179,8 @@ public class Program2Mandel {
 				Integer.parseInt(args[3]),
 				Double.parseDouble(args[4]),
 				Double.parseDouble(args[5]),
-				Double.parseDouble(args[6]));
+				Double.parseDouble(args[6]),
+				Integer.parseInt(args[7]));
 	}
 
 	
