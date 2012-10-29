@@ -2,7 +2,7 @@
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
-
+import mpi.*;
 import javax.imageio.ImageIO;
 
 
