@@ -23,10 +23,9 @@ public class Program2Mandel {
 	private int myRank;		// MPI - this instance's rank
 	private int nProcs;		// MPI - number of nodes involved
 
-	final static int tagFromMaster = 1;
-    final static int tagFromSlave = 2;
     final static int master = 0;
 	
+    
 	/**Constructor for Master Node
 	 * 
 	 * @param resX
@@ -138,8 +137,8 @@ public class Program2Mandel {
 					lines = height - startY;
 				}
 				
-				
 				receiveStart = System.currentTimeMillis();
+				
 				// Receive the pixels from the source
 				MPI.COMM_WORLD.Recv(pixelArray, startY*width, lines*width, 
 						MPI.INT, source, 0);
@@ -241,6 +240,9 @@ public class Program2Mandel {
 	
 	/**Function that performs the mathematically heavy lifting to determine if
 	 * a point being tested on the graph is within bounds.
+	 * 
+	 * The Mandelbrot computation algorithm is taken from a tutorial by
+	 * Josef Jelinek at the website java.rubikscube.info
 	 * 
 	 * @param px X point of calculation
 	 * @param py Y point of calculation
@@ -369,8 +371,6 @@ public class Program2Mandel {
 					Double.parseDouble(args[6]),
 					Double.parseDouble(args[7]),
 					Integer.parseInt(args[8]));
-		
-		
 		} else {	// Slave nodes
 			new Program2Mandel();
 		}
