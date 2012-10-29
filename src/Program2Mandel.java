@@ -37,9 +37,12 @@ public class Program2Mandel {
 	public Program2Mandel(int resX, int resY, int maxIt, int palletSize,
 			double imgZoom, double viewingX, double viewingY, int imageOption)
 			throws MPIException {
+		// MPI processing as the master
+		myRank = MPI.COMM_WORLD.Rank();
+		nProcs = MPI.COMM_WORLD.Size();
 		
 		// Catching bad values 
-		if (resX < 50 || resX > 8000 || resY < 50 || resY > 8000
+		if (resX < 1 || resX > 8000 || resY < nProcs || resY > 8000
 				|| imgZoom > 1 || viewingX < 0 || viewingX > 1
 				|| viewingY < 0 || viewingY > 1 || maxIt < 1
 				|| maxIt > 10000 || palletSize < 1 || palletSize > 255
@@ -60,11 +63,6 @@ public class Program2Mandel {
 		pixelArray = new int[width * height];
 		I = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
 
-		// MPI processing as the master
-		myRank = MPI.COMM_WORLD.Rank();
-		nProcs = MPI.COMM_WORLD.Size();
-		
-		
 		// Sending render information
 		double[] renderArgs = new double[7];
 		renderArgs[0] = width;
@@ -77,8 +75,6 @@ public class Program2Mandel {
 		
 		// Send render information to all slaves
 		MPI.COMM_WORLD.Bcast(renderArgs, 0, 7, MPI.DOUBLE, 0);
-
-		long startTime = System.currentTimeMillis();
 
 		// Calculate this computer's share
 		int startY, endY, lines;
@@ -93,18 +89,21 @@ public class Program2Mandel {
 			lines = height - startY;
 		}
 		
+		// Render the image
+		long startTime = System.currentTimeMillis();
 		calculatePixels(startY, endY);	// Calculate the Mandelbrot image
-		
 		performanceReport(timerStop(startTime), myRank);
 		
 		// Now receive the renders of the slave nodes
 		long[] execTime = new long[1];
+		long totalExecTime = 0;
 		
 		for (int source = 1; source <= nProcs; source++) {
 			
 			// Receive the execution time of this slave node
 			MPI.COMM_WORLD.Recv(execTime, 0, 1, MPI.LONG, source, 0);
 			performanceReport(execTime[0], source);
+			totalExecTime += execTime[0];
 			
 			// Calculating the pixels worked by other nodes
 			lines = height/nProcs;	
@@ -121,13 +120,16 @@ public class Program2Mandel {
 					MPI.INT, source, 0);
 		}
 		
-		System.out.println("Received all image data...");
+		// Print out some time information
+		System.out.println("Received all image data..." +
+				"\nCumulative execution time: " + totalExecTime + 
+				"ms\nResulting execution time:  " + timerStop(startTime) + 
+				"ms");
 
 		// Save pixelArray to a BufferedImage
 		I.setRGB(0, 0, width, height, pixelArray, 0, width);
 		
-		saveImg(imageOption);	// Save BufferedImage to a file
-		
+		saveImg(imageOption);	// Save BufferedImage to a file	
 	}
 	
 	
@@ -154,10 +156,6 @@ public class Program2Mandel {
 		createColorPallet((int)renderArgs[6]);	// Initialize the pallet
 		pixelArray = new int[width * height];	// Initialize the pixelArray
 		
-		// Render the image
-		long startTime = System.currentTimeMillis();
-		long[] execTime = new long[1];
-		
 		// Calculate this computer's share
 		int startY, endY, lines;
 		lines = height/nProcs;	// Number of lines this node is responsible for
@@ -171,8 +169,10 @@ public class Program2Mandel {
 			lines = height - startY;
 		}
 		
+		// Render the image
+		long startTime = System.currentTimeMillis();
+		long[] execTime = new long[1];
 		calculatePixels(startY, endY);	// Calculate the Mandelbrot image
-		
 		execTime[0] = timerStop(startTime);
 		
 		// Send this slave's execution time to master
@@ -190,18 +190,18 @@ public class Program2Mandel {
 	 */
 	private void calculatePixels(int startY, int endY) {
 		for (int y = startY; y <= endY; y++) {
-			for (int x = 0; x < width; x++) {
-				
-				// Finding mathematical location of a pixel for the Mandelbrot
-				double r = zoom / Math.min(width, height);
-				double dx = 2.5 * (x * r + viewX) - 2.0;
-				double dy = 1.25 - 2.5 * (y * r + viewY);
-				
-				// Perform Mandelbrot calculation on this point
-				int iteration = mandel(dx, dy);
-				pixelArray[(y * width) + x] 
-						= colorPallet[iteration % colorPallet.length];
-			}
+		for (int x = 0; x < width; x++) {
+			
+			// Finding mathematical location of a pixel for the Mandelbrot
+			double r = zoom / Math.min(width, height);
+			double dx = 2.5 * (x * r + viewX) - 2.0;
+			double dy = 1.25 - 2.5 * (y * r + viewY);
+			
+			// Perform Mandelbrot calculation on this point
+			int iteration = mandel(dx, dy);
+			pixelArray[(y * width) + x] 
+					= colorPallet[iteration % colorPallet.length];
+		}
 		}
 	}
 	
