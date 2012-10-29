@@ -35,12 +35,15 @@ public class Program2Mandel {
 	public Program2Mandel(int resX, int resY, int maxIt, int palletSize,
 			double imgZoom, double viewingX, double viewingY, int imageOption){
 		
-		// Catching bad values
-		if (resX < 1 || resX > 5000 || resY < 1 || resY > 5000
+		// Catching bad values 
+		if (resX < 50 || resX > 8000 || resY < 50 || resY > 8000
 				|| imgZoom > 1 || viewingX < 0 || viewingX > 1
 				|| viewingY < 0 || viewingY > 1 || maxIt < 1
-				|| maxIt > 10000 || palletSize < 1 || palletSize > 255)
+				|| maxIt > 10000 || palletSize < 1 || palletSize > 255) {
+			System.out.println("One or more of your arguments was " +
+					"outside of acceptable/sane bounds.");
 			return;
+		}
 		
 		pixelArray = new int[resX * resY];
 		width = resX;
@@ -52,19 +55,52 @@ public class Program2Mandel {
 		colorPallet = new int[palletSize];
 		I = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
 		
-		createColorPallet();	// Initialize the pallet
-		calculatePixels();		// Calculate the Mandelbrot image
-		paintPixels();			// Save pixelArray to a BufferedImage
+		createColorPallet();		// Initialize the pallet
+		
+		long startTime = System.currentTimeMillis();
+		calculatePixels(0, height-1);	// Calculate the Mandelbrot image
+		performanceReport(startTime);
+		
+		paintPixels();				// Save pixelArray to a BufferedImage
 		
 		saveImg(imageOption);	// Save BufferedImage to a file
 		
 	}
 	
+	
+	/**Default constructor.
+	 * Builds a Mandelbrot image with basic settings. Does not save to disk.
+	 */
+	public Program2Mandel() {
+		pixelArray = new int[500 * 500];
+		width = 500;
+		height = 500;
+		iterations = 64;
+		zoom = 1;
+		viewX = 0;
+		viewY = 0;
+		colorPallet = new int[64];
+		I = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+		
+		createColorPallet();		// Initialize the pallet
+		
+		long startTime = System.currentTimeMillis();
+		calculatePixels(0, height-1);	// Calculate the Mandelbrot image
+		performanceReport(startTime);
+		
+		paintPixels();				// Save pixelArray to a BufferedImage
+		
+		saveImg(0);	// Save BufferedImage to a file
+	}
+	
+	
 	/**Imports the pixel array into the BufferedImage using a standard method
+	 * BufferedImage.setRGB()
 	 */
 	private void paintPixels() {
 		I.setRGB(0, 0, width, height, pixelArray, 0, width);
 	}
+	
 	
 	/**Creates a file and uses ImageIO.write to save the BufferedImage to
 	 * a local file location.
@@ -86,25 +122,34 @@ public class Program2Mandel {
 		} catch (IOException e) { e.printStackTrace(); }
 	}
 	
+	
 	/**Performs a nested loop that does the calculations of a Mandelbrot
 	 * image with support for zoom and varying locations.
+	 * 
+	 * @param startY Starting render line
+	 * @param endY Ending render line
 	 */
-	private void calculatePixels() {
-		for (int y = 0; y < height; y++) {
+	private void calculatePixels(int startY, int endY) {
+		int lines = endY - startY + 1;
+		
+		/* The y-axis is kept in "lines" needed to render. When writing to
+		 * an array, we use y-1 for 0-start counting. */
+		for (int y = 1; y <= lines; y++) {
 			for (int x = 0; x < width; x++) {
 				
 				// Finding mathematical location of a pixel for the Mandelbrot
 				double r = zoom / Math.min(width, height);
 				double dx = 2.5 * (x * r + viewX) - 2.0;
-				double dy = 1.25 - 2.5 * (y * r + viewY);
+				double dy = 1.25 - 2.5 * ((y-1) * r + viewY);
 				
 				// Perform Mandelbrot calculation on this point
 				int iteration = mandel(dx, dy);
-				pixelArray[(y * width) + x] 
+				pixelArray[((y-1) * width) + x] 
 						= colorPallet[iteration % colorPallet.length];
 			}
 		}
 	}
+	
 	
 	/**Function that performs the mathematically heavy lifting to determine if
 	 * a point being tested on the graph is within bounds.
@@ -127,6 +172,7 @@ public class Program2Mandel {
 		return iteration == iterations ? 0 : iteration;
 	}
 	
+	
 	/**Creates an array of set RGB colors that shows different tones depending
 	 * on the number of iterations of the Mandelbrot set needed to rule the
 	 * pixel out.
@@ -144,6 +190,7 @@ public class Program2Mandel {
 		}
 	}
 	
+	
 	/**Uses Bitwise operations to place the three 8-bit colors into a single
 	 * integer that takes up the first 24 bit places
 	 * 
@@ -153,8 +200,31 @@ public class Program2Mandel {
 	 * @return integer representing all three values in 24 bits
 	 */
 	private int getRGBInt(int r, int g, int b) {
-		return new Integer( ( r<<16 | g<<8 | b ) );
+		return new Integer(( r<<16 | g<<8 | b ));
 	}
+	
+	
+	/**Difference in milliseconds from startTime to present
+	 * 
+	 * @param startTime 
+	 * @return The difference in milliseconds from startTime to present
+	 */
+	private long timerStop(long startTime) {
+		return System.currentTimeMillis() - startTime;
+	}
+	
+	
+	/**Bonus function prints out execution performance statistics 
+	 * 
+	 * @param startTime
+	 * @return execution time if needed
+	 */
+	private long performanceReport(long startTime) {
+		long calcTime = timerStop(startTime);
+		System.out.println("Time to calculate pixels: " + calcTime + "ms");
+		return calcTime;
+	}
+	
 	
 	/**Instantiates the class from the console
 	 * @param args String array of arguments from console
