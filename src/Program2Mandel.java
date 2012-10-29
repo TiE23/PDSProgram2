@@ -252,6 +252,4 @@ public class Program2Mandel {
 				Double.parseDouble(args[6]),
 				Integer.parseInt(args[7]));
 	}
-
-	
 }
