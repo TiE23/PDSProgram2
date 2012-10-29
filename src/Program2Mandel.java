@@ -7,21 +7,23 @@ import javax.imageio.ImageIO;
 
 
 public class Program2Mandel {
-	private BufferedImage I;
+	private BufferedImage I;	// Rendered image object
 	
-	private int[] pixelArray;
+	private int[] pixelArray;	// Rendered image pixel array
 	
 	private int[] colorPallet;
 	private double viewX;
 	private double viewY;
 	private double zoom;
 	
-	private int iterations;
-	private int width;
-	private int height;
+	private int iterations;	// Iteration depth
+	private int width;		// Width of render
+	private int height;		// Height of render
 	
+	private int myRank;		// MPI - this instance's rank
+	private int nProcs;		// MPI - number of nodes involved
 
-	/** Constructor for Program2Mandel
+	/**Constructor for Master Node
 	 * 
 	 * @param resX
 	 * @param resY
@@ -33,118 +35,171 @@ public class Program2Mandel {
 	 * @param imageOption
 	 */
 	public Program2Mandel(int resX, int resY, int maxIt, int palletSize,
-			double imgZoom, double viewingX, double viewingY, int imageOption){
+			double imgZoom, double viewingX, double viewingY, int imageOption)
+			throws MPIException {
 		
 		// Catching bad values 
 		if (resX < 50 || resX > 8000 || resY < 50 || resY > 8000
 				|| imgZoom > 1 || viewingX < 0 || viewingX > 1
 				|| viewingY < 0 || viewingY > 1 || maxIt < 1
-				|| maxIt > 10000 || palletSize < 1 || palletSize > 255) {
+				|| maxIt > 10000 || palletSize < 1 || palletSize > 255
+				|| imageOption < 0 || imageOption > 2) {
 			System.out.println("One or more of your arguments was " +
 					"outside of acceptable/sane bounds.");
 			return;
 		}
 		
-		pixelArray = new int[resX * resY];
+		// Basic initialization as determined by the user's input
 		width = resX;
 		height = resY;
 		iterations = maxIt;
 		zoom = imgZoom;
 		viewX = viewingX;
 		viewY = viewingY;
-		colorPallet = new int[palletSize];
+		createColorPallet(palletSize);		// Initialize the pallet
+		pixelArray = new int[width * height];
 		I = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+
+		// MPI processing as the master
+		myRank = MPI.COMM_WORLD.Rank();
+		nProcs = MPI.COMM_WORLD.Size();
 		
-		createColorPallet();		// Initialize the pallet
 		
+		// Sending render information
+		double[] renderArgs = new double[7];
+		renderArgs[0] = width;
+		renderArgs[1] = height;
+		renderArgs[2] = iterations;
+		renderArgs[3] = zoom;
+		renderArgs[4] = viewX;
+		renderArgs[5] = viewY;
+		renderArgs[6] = palletSize;
+		
+		// Send render information to all slaves
+		MPI.COMM_WORLD.Bcast(renderArgs, 0, 7, MPI.DOUBLE, 0);
+
 		long startTime = System.currentTimeMillis();
-		calculatePixels(0, height-1);	// Calculate the Mandelbrot image
-		performanceReport(startTime);
+
+		// Calculate this computer's share
+		int startY, endY, lines;
+		lines = height/nProcs;	// Number of lines this node is responsible for
+		startY = myRank * lines;
+		endY = ( (myRank+1) * lines) - 1;
 		
-		paintPixels();				// Save pixelArray to a BufferedImage
+		/* If (height/nProcs) doesn't round nicely, the last node will render
+		 * the remainder number of lines of the image. */
+		if ( (myRank+2 * lines) > height ) {
+			endY = height-1;
+			lines = height - startY;
+		}
+		
+		calculatePixels(startY, endY);	// Calculate the Mandelbrot image
+		
+		performanceReport(timerStop(startTime), myRank);
+		
+		// Now receive the renders of the slave nodes
+		long[] execTime = new long[1];
+		
+		for (int source = 1; source <= nProcs; source++) {
+			
+			// Receive the execution time of this slave node
+			MPI.COMM_WORLD.Recv(execTime, 0, 1, MPI.LONG, source, 0);
+			performanceReport(execTime[0], source);
+			
+			// Calculating the pixels worked by other nodes
+			lines = height/nProcs;	
+			startY = source * lines;
+			endY = ( (source+1) * lines) - 1;
+			
+			if ( (source+2 * lines) > height ) {
+				endY = height-1;
+				lines = height - startY;
+			}
+			
+			// Receive the pixels from the source
+			MPI.COMM_WORLD.Recv(pixelArray, startY*width, lines*width, 
+					MPI.INT, source, 0);
+		}
+		
+		System.out.println("Received all image data...");
+
+		// Save pixelArray to a BufferedImage
+		I.setRGB(0, 0, width, height, pixelArray, 0, width);
 		
 		saveImg(imageOption);	// Save BufferedImage to a file
 		
 	}
 	
 	
-	/**Default constructor.
-	 * Builds a Mandelbrot image with basic settings. Does not save to disk.
+	/**Constructor for Slave nodes
+	 * 
 	 */
-	public Program2Mandel() {
-		pixelArray = new int[500 * 500];
-		width = 500;
-		height = 500;
-		iterations = 64;
-		zoom = 1;
-		viewX = 0;
-		viewY = 0;
-		colorPallet = new int[64];
-		I = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+	public Program2Mandel() throws MPIException {
+		// MPI processing as a slave
+		myRank = MPI.COMM_WORLD.Rank();
+		nProcs = MPI.COMM_WORLD.Size();
 		
-		createColorPallet();		// Initialize the pallet
+		// Receive render information from Master
+		double[] renderArgs = new double[7];
 		
+		MPI.COMM_WORLD.Recv(renderArgs, 0, 7, MPI.DOUBLE, 0, 0);
+		
+		width = (int)renderArgs[0];
+		height = (int)renderArgs[1];
+		iterations = (int)renderArgs[2];
+		zoom = renderArgs[3];
+		viewX = renderArgs[4];
+		viewY = renderArgs[5];
+		
+		createColorPallet((int)renderArgs[6]);	// Initialize the pallet
+		pixelArray = new int[width * height];	// Initialize the pixelArray
+		
+		// Render the image
 		long startTime = System.currentTimeMillis();
-		calculatePixels(0, height-1);	// Calculate the Mandelbrot image
-		performanceReport(startTime);
+		long[] execTime = new long[1];
 		
-		paintPixels();				// Save pixelArray to a BufferedImage
+		// Calculate this computer's share
+		int startY, endY, lines;
+		lines = height/nProcs;	// Number of lines this node is responsible for
+		startY = myRank * lines;
+		endY = ( (myRank+1) * lines) - 1;
 		
-		saveImg(0);	// Save BufferedImage to a file
-	}
-	
-	
-	/**Imports the pixel array into the BufferedImage using a standard method
-	 * BufferedImage.setRGB()
-	 */
-	private void paintPixels() {
-		I.setRGB(0, 0, width, height, pixelArray, 0, width);
-	}
-	
-	
-	/**Creates a file and uses ImageIO.write to save the BufferedImage to
-	 * a local file location.
-	 * @param option 0 = No Image; 1 = JPEG; 2 = PNG
-	 */
-	private void saveImg(int option) {
+		/* If (height/nProcs) doesn't round nicely, the last node will render
+		 * the remainder number of lines of the image. */
+		if ( (myRank+2 * lines) > height ) {
+			endY = height-1;
+			lines = height - startY;
+		}
 		
-		if (option < 0 || option > 2)
-			return;
+		calculatePixels(startY, endY);	// Calculate the Mandelbrot image
 		
-		try {
-			File file = new File("mandelbrot.png");
-			
-			switch(option) {
-			case 0:	break;							// No image saved.
-			case 1: ImageIO.write(I, "jpg", file);	// JPG, lower quality+size
-			case 2: ImageIO.write(I, "png", file);	// PNG, higher quality+size
-			}
-		} catch (IOException e) { e.printStackTrace(); }
+		execTime[0] = timerStop(startTime);
+		
+		// Send this slave's execution time to master
+		MPI.COMM_WORLD.Send(execTime, 0, 1, MPI.LONG, 0, 0);
+		MPI.COMM_WORLD.Send(pixelArray, 
+				startY*width, lines*width, MPI.INT, 0, 0);
 	}
 	
 	
 	/**Performs a nested loop that does the calculations of a Mandelbrot
 	 * image with support for zoom and varying locations.
 	 * 
-	 * @param startY Starting render line
-	 * @param endY Ending render line
+	 * @param startY Starting render line (zero base count)
+	 * @param endY Ending render line (zero base count)
 	 */
 	private void calculatePixels(int startY, int endY) {
-		int lines = endY - startY + 1;
-		
-		/* The y-axis is kept in "lines" needed to render. When writing to
-		 * an array, we use y-1 for 0-start counting. */
-		for (int y = 1; y <= lines; y++) {
+		for (int y = startY; y <= endY; y++) {
 			for (int x = 0; x < width; x++) {
 				
 				// Finding mathematical location of a pixel for the Mandelbrot
 				double r = zoom / Math.min(width, height);
 				double dx = 2.5 * (x * r + viewX) - 2.0;
-				double dy = 1.25 - 2.5 * ((y-1) * r + viewY);
+				double dy = 1.25 - 2.5 * (y * r + viewY);
 				
 				// Perform Mandelbrot calculation on this point
 				int iteration = mandel(dx, dy);
-				pixelArray[((y-1) * width) + x] 
+				pixelArray[(y * width) + x] 
 						= colorPallet[iteration % colorPallet.length];
 			}
 		}
@@ -177,8 +232,10 @@ public class Program2Mandel {
 	 * on the number of iterations of the Mandelbrot set needed to rule the
 	 * pixel out.
 	 */
-	private void createColorPallet() {
-
+	private void createColorPallet(int palletSize) {
+		
+		colorPallet = new int[palletSize];
+		
 		for (int i = 0; i < colorPallet.length; i++) {
 			// Generate a gradient of black to white.
 			int c = (( i * 2 * 255 ) / colorPallet.length);
@@ -188,6 +245,28 @@ public class Program2Mandel {
 			// Create some color tones by turning down different colors
 			colorPallet[i] = getRGBInt( (int) (c/4), (int) (c/1.3), c );
 		}
+	}
+	
+	
+	/**Creates a file and uses ImageIO.write to save the BufferedImage to
+	 * a local file location.
+	 * 
+	 * @param option 0 = No Image; 1 = JPEG; 2 = PNG -- Error handling 
+	 * performed in constructor
+	 */
+	private void saveImg(int option) {
+		try {
+			File file = new File("mandelbrot.png");
+			
+			switch(option) {
+			case 0:	break;							// No image saved.
+			case 1: ImageIO.write(I, "jpg", file);	// JPG, lower quality+size
+			case 2: ImageIO.write(I, "png", file);	// PNG, higher quality+size
+			}
+		} catch (IOException e) { e.printStackTrace(); }
+		
+		if (option != 0 )
+			System.out.println("Saved to file.");
 	}
 	
 	
@@ -219,37 +298,48 @@ public class Program2Mandel {
 	 * @param startTime
 	 * @return execution time if needed
 	 */
-	private long performanceReport(long startTime) {
-		long calcTime = timerStop(startTime);
-		System.out.println("Time to calculate pixels: " + calcTime + "ms");
-		return calcTime;
+	private void performanceReport(long calcTime, int rank) {
+		System.out.println("Execution time of node " + 
+				rank + ": " + calcTime + "ms");
 	}
 	
 	
 	/**Instantiates the class from the console
 	 * @param args String array of arguments from console
 	 */
-	public static void main(String args[]) {
+	public static void main(String args[]) throws MPIException {
+		MPI.init( args );
 		
-		// Console use information
-		if (args.length != 8) {
-			System.out.println("Please place arguments in this order:\n"+
-					"	Render Width, Render Height, Iterations,\n " + 
-					"	Color Pallet Size (<256), Zoom Level (<=1),\n" + 
-					"	Initial X coord (0-1), Initial Y coord(0-1),\n" +
-					"	[Image format; 1 = jpg, 2 = png, 0 = none]");
-		return;
+		// Master node
+		if (MPI.COMM_WORLD.Rank() == 0 ) {
+			
+			// Console use information
+			if (args.length != 9) {
+				System.out.println("Please place arguments in this order:\n"+
+						"	Render Width, Render Height, Iterations,\n " + 
+						"	Color Pallet Size (<256), Zoom Level (<=1),\n" + 
+						"	Initial X coord (0-1), Initial Y coord(0-1),\n" +
+						"	[Image format; 1 = jpg, 2 = png, 0 = none]");
+				return;
+			}
+			
+			// Instantiate the class and pass in the various arguments
+			new Program2Mandel(
+					Integer.parseInt(args[1]),
+					Integer.parseInt(args[2]),
+					Integer.parseInt(args[3]),
+					Integer.parseInt(args[4]),
+					Double.parseDouble(args[5]),
+					Double.parseDouble(args[6]),
+					Double.parseDouble(args[7]),
+					Integer.parseInt(args[8]));
+		
+		
+		} else {	// Slave nodes
+			new Program2Mandel();
 		}
 		
-		// Instantiate the class and pass in the various arguments
-		new Program2Mandel(
-				Integer.parseInt(args[0]),
-				Integer.parseInt(args[1]),
-				Integer.parseInt(args[2]),
-				Integer.parseInt(args[3]),
-				Double.parseDouble(args[4]),
-				Double.parseDouble(args[5]),
-				Double.parseDouble(args[6]),
-				Integer.parseInt(args[7]));
+		// Terminate the MPI Library
+		MPI.Finalize();
 	}
 }
