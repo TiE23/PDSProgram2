@@ -2,9 +2,9 @@
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
-import mpi.*;
 import javax.imageio.ImageIO;
 
+import mpi.*;
 
 public class Program2Mandel {
 	private BufferedImage I;	// Rendered image object
@@ -23,6 +23,10 @@ public class Program2Mandel {
 	private int myRank;		// MPI - this instance's rank
 	private int nProcs;		// MPI - number of nodes involved
 
+	final static int tagFromMaster = 1;
+    final static int tagFromSlave = 2;
+    final static int master = 0;
+	
 	/**Constructor for Master Node
 	 * 
 	 * @param resX
@@ -42,14 +46,15 @@ public class Program2Mandel {
 		nProcs = MPI.COMM_WORLD.Size();
 		
 		// Catching bad values 
-		if (resX < 1 || resX > 8000 || resY < nProcs || resY > 8000
-				|| imgZoom > 1 || viewingX < 0 || viewingX > 1
+		if (resX < 1 || resX > 10000 || resY < nProcs || resY > 10000
+				|| imgZoom > 1 || imgZoom <= 0
+				|| viewingX < 0 || viewingX > 1
 				|| viewingY < 0 || viewingY > 1 || maxIt < 1
-				|| maxIt > 10000 || palletSize < 1 || palletSize > 255
+				|| maxIt > 20000 || palletSize < 1 || palletSize > 255
 				|| imageOption < 0 || imageOption > 2) {
 			System.out.println("One or more of your arguments was " +
 					"outside of acceptable/sane bounds.");
-			return;
+			System.exit( -1 );
 		}
 		
 		// Basic initialization as determined by the user's input
@@ -61,8 +66,15 @@ public class Program2Mandel {
 		viewY = viewingY;
 		createColorPallet(palletSize);		// Initialize the pallet
 		pixelArray = new int[width * height];
+		
+		/* May throw up memory errors for very large images (over 16mp). 
+		 * Use the java argument -Xmx to increase maximum memory. 
+		 * -Xmx300m for example would give 300mb of memory to this program.
+		 * Place the argument like so: 
+		 * "prunjava [procs] -Xmx300m Program2Mandel [args]" */
 		I = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
 
+		
 		// Sending render information
 		double[] renderArgs = new double[7];
 		renderArgs[0] = width;
@@ -74,7 +86,8 @@ public class Program2Mandel {
 		renderArgs[6] = palletSize;
 		
 		// Send render information to all slaves
-		MPI.COMM_WORLD.Bcast(renderArgs, 0, 7, MPI.DOUBLE, 0);
+		for (int r = 1; r < nProcs; r++) 
+			MPI.COMM_WORLD.Send(renderArgs, 0, 7, MPI.DOUBLE, r, 0);
 
 		// Calculate this computer's share
 		int startY, endY, lines;
@@ -84,7 +97,7 @@ public class Program2Mandel {
 		
 		/* If (height/nProcs) doesn't round nicely, the last node will render
 		 * the remainder number of lines of the image. */
-		if ( (myRank+2 * lines) > height ) {
+		if ( ((myRank+2) * lines) > height ) {
 			endY = height-1;
 			lines = height - startY;
 		}
@@ -92,39 +105,58 @@ public class Program2Mandel {
 		// Render the image
 		long startTime = System.currentTimeMillis();
 		calculatePixels(startY, endY);	// Calculate the Mandelbrot image
-		performanceReport(timerStop(startTime), myRank);
-		
-		// Now receive the renders of the slave nodes
 		long[] execTime = new long[1];
-		long totalExecTime = 0;
+		execTime[0] = timerStop(startTime);
+		performanceReport(execTime[0], myRank);	// Report the execution time
 		
-		for (int source = 1; source <= nProcs; source++) {
+		// If there are any slave nodes...
+		if (nProcs > 1) {
+		
+			// Now receive the execution times of the slave nodes
+			long totalExecTime = execTime[0];
 			
-			// Receive the execution time of this slave node
-			MPI.COMM_WORLD.Recv(execTime, 0, 1, MPI.LONG, source, 0);
-			performanceReport(execTime[0], source);
-			totalExecTime += execTime[0];
-			
-			// Calculating the pixels worked by other nodes
-			lines = height/nProcs;	
-			startY = source * lines;
-			endY = ( (source+1) * lines) - 1;
-			
-			if ( (source+2 * lines) > height ) {
-				endY = height-1;
-				lines = height - startY;
+			for (int source = 1; source < nProcs; source++) {
+				// Receive the execution time of this slave node
+				MPI.COMM_WORLD.Recv(execTime, 0, 1, MPI.LONG, source, 0);
+				performanceReport(execTime[0], source);
+				totalExecTime += execTime[0];
 			}
 			
-			// Receive the pixels from the source
-			MPI.COMM_WORLD.Recv(pixelArray, startY*width, lines*width, 
-					MPI.INT, source, 0);
+			long receiveStart = 0;
+			long totalReceiveTime = 0;
+			
+			// Receive the image data
+			System.out.print("\nReceiving pixel arrays: ");
+			for (int source = 1; source < nProcs; source++) {
+				// Calculating the pixels worked by other nodes
+				lines = height/nProcs;	
+				startY = source * lines;
+				endY = ( (source+1) * lines) - 1;
+				
+				if ( ((source+2) * lines) > height ) {
+					endY = height-1;
+					lines = height - startY;
+				}
+				
+				
+				receiveStart = System.currentTimeMillis();
+				// Receive the pixels from the source
+				MPI.COMM_WORLD.Recv(pixelArray, startY*width, lines*width, 
+						MPI.INT, source, 0);
+				System.out.print(source + " Received! ");
+				
+				// Clock the transfer time
+				totalReceiveTime += timerStop(receiveStart);
+				
+			}
+			System.out.println("\n\nReceived all image data..." +
+					"\nPixel Array Transfer time: " + totalReceiveTime + "ms" +
+					"\nCumulative execution time: " + totalExecTime + "ms");
 		}
 		
 		// Print out some time information
-		System.out.println("Received all image data..." +
-				"\nCumulative execution time: " + totalExecTime + 
-				"ms\nResulting execution time:  " + timerStop(startTime) + 
-				"ms");
+		System.out.println("Turn-around time: " + 
+				timerStop(startTime) + "ms");
 
 		// Save pixelArray to a BufferedImage
 		I.setRGB(0, 0, width, height, pixelArray, 0, width);
@@ -144,8 +176,8 @@ public class Program2Mandel {
 		// Receive render information from Master
 		double[] renderArgs = new double[7];
 		
-		MPI.COMM_WORLD.Recv(renderArgs, 0, 7, MPI.DOUBLE, 0, 0);
-		
+		MPI.COMM_WORLD.Recv(renderArgs, 0, 7, MPI.DOUBLE, master, 0);
+
 		width = (int)renderArgs[0];
 		height = (int)renderArgs[1];
 		iterations = (int)renderArgs[2];
@@ -164,7 +196,7 @@ public class Program2Mandel {
 		
 		/* If (height/nProcs) doesn't round nicely, the last node will render
 		 * the remainder number of lines of the image. */
-		if ( (myRank+2 * lines) > height ) {
+		if ( ((myRank+2) * lines) > height ) {
 			endY = height-1;
 			lines = height - startY;
 		}
@@ -174,11 +206,11 @@ public class Program2Mandel {
 		long[] execTime = new long[1];
 		calculatePixels(startY, endY);	// Calculate the Mandelbrot image
 		execTime[0] = timerStop(startTime);
-		
+
 		// Send this slave's execution time to master
-		MPI.COMM_WORLD.Send(execTime, 0, 1, MPI.LONG, 0, 0);
+		MPI.COMM_WORLD.Send(execTime, 0, 1, MPI.LONG, master, 0);
 		MPI.COMM_WORLD.Send(pixelArray, 
-				startY*width, lines*width, MPI.INT, 0, 0);
+				startY*width, lines*width, MPI.INT, master, 0);
 	}
 	
 	
@@ -189,6 +221,7 @@ public class Program2Mandel {
 	 * @param endY Ending render line (zero base count)
 	 */
 	private void calculatePixels(int startY, int endY) {
+		//System.out.println("Rendering lines " + startY + " to " + endY);
 		for (int y = startY; y <= endY; y++) {
 		for (int x = 0; x < width; x++) {
 			
@@ -256,12 +289,15 @@ public class Program2Mandel {
 	 */
 	private void saveImg(int option) {
 		try {
-			File file = new File("mandelbrot.png");
-			
+			File file;
 			switch(option) {
 			case 0:	break;							// No image saved.
-			case 1: ImageIO.write(I, "jpg", file);	// JPG, lower quality+size
-			case 2: ImageIO.write(I, "png", file);	// PNG, higher quality+size
+			case 1: file = new File("mandelbrot.jpg");
+					ImageIO.write(I, "jpg", file);	// JPG, lower quality+size		
+					break;
+			case 2: file = new File("mandelbrot.png");
+					ImageIO.write(I, "png", file);	// PNG, higher quality+size
+					break;
 			}
 		} catch (IOException e) { e.printStackTrace(); }
 		
@@ -300,7 +336,7 @@ public class Program2Mandel {
 	 */
 	private void performanceReport(long calcTime, int rank) {
 		System.out.println("Execution time of node " + 
-				rank + ": " + calcTime + "ms");
+				rank + ":  " + calcTime + "ms");
 	}
 	
 	
@@ -308,19 +344,19 @@ public class Program2Mandel {
 	 * @param args String array of arguments from console
 	 */
 	public static void main(String args[]) throws MPIException {
-		MPI.init( args );
+		MPI.Init( args );
 		
 		// Master node
 		if (MPI.COMM_WORLD.Rank() == 0 ) {
 			
 			// Console use information
-			if (args.length != 9) {
+			if (args.length != 1 + (8*2)) {
 				System.out.println("Please place arguments in this order:\n"+
 						"	Render Width, Render Height, Iterations,\n " + 
 						"	Color Pallet Size (<256), Zoom Level (<=1),\n" + 
 						"	Initial X coord (0-1), Initial Y coord(0-1),\n" +
 						"	[Image format; 1 = jpg, 2 = png, 0 = none]");
-				return;
+				System.exit( -1 );
 			}
 			
 			// Instantiate the class and pass in the various arguments
